@@ -1,0 +1,80 @@
+name: Manual Sandpack Bundler Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag, for example v1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: manual-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and release Sandpack bundler
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag
+        env:
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          if [[ ! "$TAG_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "Tag name can only contain letters, numbers, dots, underscores, and hyphens."
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag $TAG_NAME already exists."
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build dependencies
+        run: yarn build:deps
+
+      - name: Build Sandpack bundler
+        run: yarn build:sandpack
+
+      - name: Package build output
+        env:
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          test -d www
+
+          test -f www/index.html
+
+          ASSET_BASENAME="sandpack-bundler-$TAG_NAME"
+          tar -czf "$ASSET_BASENAME.tar.gz" www
+          zip -r "$ASSET_BASENAME.zip" www
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          gh release create "$TAG_NAME" \
+            "sandpack-bundler-$TAG_NAME.tar.gz" \
+            "sandpack-bundler-$TAG_NAME.zip" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG_NAME" \
+            --notes "Manual Sandpack bundler release for $TAG_NAME."
