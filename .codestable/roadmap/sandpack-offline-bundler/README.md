@@ -12,8 +12,8 @@
 2. 默认运行模式为 `local-first`：先读取镜像内置离线包，缺失时允许公网回退。
 3. 支持私有化交付时显式切换为 `offline-only`：只读本地离线包，缺包直接报错，不访问公网。
 4. 支持根路径和宿主应用子路径反代部署，例如 `/` 与 `/sandpack-bundler/`。
-5. GitHub Actions 构建镜像并推送 GHCR，同时创建 Release，提供 manifest、docker-compose 示例和部署说明。
-6. 私有化部署环境可通过 `docker load` + `docker compose up -d` 部署，不要求访问 GHCR 或 npm/CDN 公网服务。
+5. GitHub Actions 构建镜像并推送 Docker Hub，同时创建 Release，提供 manifest、docker-compose 示例和部署说明。
+6. 私有化部署环境可通过 `docker load` + `docker compose up -d` 部署，不要求访问 Docker Hub 或 npm/CDN 公网服务。
 
 ## 非目标
 
@@ -263,7 +263,7 @@ download offline packages
 verify
 docker build
 smoke test
-push GHCR
+push Docker Hub
 create GitHub Release
 ```
 
@@ -283,10 +283,10 @@ README-DEPLOY.md
 内部制品：
 
 ```bash
-docker pull ghcr.io/<owner>/sandpack-bundler:1.0.0
+docker pull docker.io/<dockerhub-username>/sandpack-bundler:1.0.0
 
 docker tag \
-  ghcr.io/<owner>/sandpack-bundler:1.0.0 \
+  docker.io/<dockerhub-username>/sandpack-bundler:1.0.0 \
   sandpack-bundler:1.0.0
 
 docker save sandpack-bundler:1.0.0 \
