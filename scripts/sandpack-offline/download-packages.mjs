@@ -123,16 +123,24 @@ async function downloadPackage(name, version) {
     throw new Error(`Invalid jsDelivr flat response for ${spec}`);
   }
 
-  for (const file of flat.files) {
-    if (!file || typeof file.name !== 'string') {
-      continue;
-    }
+  const CONCURRENCY = 20;
+  const validFiles = flat.files.filter(
+    file => file && typeof file.name === 'string'
+  );
 
-    const fileUrl = `${JSDELIVR_NPM_BASE}/npm/${spec}${toUrlPath(
-      file.name
-    )}`;
-    await downloadToFile(fileUrl);
+  for (let i = 0; i < validFiles.length; i += CONCURRENCY) {
+    const batch = validFiles.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      batch.map(file => {
+        const fileUrl = `${JSDELIVR_NPM_BASE}/npm/${spec}${toUrlPath(
+          file.name
+        )}`;
+        return downloadToFile(fileUrl);
+      })
+    );
   }
+
+  console.log(`✓ Completed ${spec}`);
 }
 
 async function writeManifest(packages) {
@@ -154,12 +162,18 @@ async function main() {
 
   await fs.rm(OFFLINE_DIR, { recursive: true, force: true });
 
-  for (const [name, version] of Object.entries(packages)) {
-    await downloadPackage(name, version);
+  const PACKAGE_CONCURRENCY = 5;
+  const packageEntries = Object.entries(packages);
+
+  for (let i = 0; i < packageEntries.length; i += PACKAGE_CONCURRENCY) {
+    const batch = packageEntries.slice(i, i + PACKAGE_CONCURRENCY);
+    await Promise.all(
+      batch.map(([name, version]) => downloadPackage(name, version))
+    );
   }
 
   await writeManifest(packages);
-  console.log(`Offline packages written to ${OFFLINE_DIR}`);
+  console.log(`\n✓ All packages downloaded to ${OFFLINE_DIR}`);
 }
 
 main().catch(error => {
