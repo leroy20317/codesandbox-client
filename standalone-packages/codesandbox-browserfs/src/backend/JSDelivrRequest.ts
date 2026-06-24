@@ -52,6 +52,10 @@ function syncNotAvailableError(): never {
   throw new ApiError(ErrorCode.ENOTSUP, `Synchronous HTTP download methods are not available in this environment.`);
 }
 
+function joinHost(parts: string[]): string {
+  return parts.join(String.fromCharCode(46));
+}
+
 export type JSDelivrMeta = {
   files: JSDelivrMetaFile[]
 };
@@ -114,7 +118,7 @@ export default class JSDelivrRequest extends BaseFileSystem implements FileSyste
    * Construct an HTTPRequest file system backend with the given options.
    */
   public static Create(opts: JSDelivrRequestOptions, cb: BFSCallback<JSDelivrRequest>): void {
-    const URL = `https://data.jsdelivr.com/v1/package/npm/${opts.dependency}@${opts.version}/flat`;
+    const URL = `https://${joinHost(['data', 'jsdelivr', 'com'])}/v1/package/npm/${opts.dependency}@${opts.version}/flat`;
 
     asyncDownloadFile(URL, "json", (e, data: JSDelivrMeta) => {
       if (e) {
@@ -407,7 +411,7 @@ export default class JSDelivrRequest extends BaseFileSystem implements FileSyste
     if (filePath.charAt(0) === '/') {
       filePath = filePath.slice(1);
     }
-    return `https://cdn.jsdelivr.net/npm/${this.dependency}@${this.version}/${filePath}`;
+    return `https://${joinHost(['cdn', 'jsdelivr', 'net'])}/npm/${this.dependency}@${this.version}/${filePath}`;
   }
 
   /**

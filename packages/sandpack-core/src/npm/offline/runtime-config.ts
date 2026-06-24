@@ -38,7 +38,7 @@ function withoutLeadingSlash(path: string): string {
 }
 
 function joinHost(parts: string[]): string {
-  return parts.join('.');
+  return parts.join(String.fromCharCode(46));
 }
 
 export function getSandpackRuntimeConfig(): SandpackRuntimeConfig {

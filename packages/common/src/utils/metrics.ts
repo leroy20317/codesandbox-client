@@ -121,52 +121,12 @@ getGlobal().measurements = {
   getMeasurements,
 };
 
-const MEASUREMENT_API = `https://col.csbops.io/data/sandpack`;
-
 export function persistMeasurements(data: {
   sandboxId: string;
   cacheUsed: boolean;
   browser: string;
   version: string;
 }): Promise<Response | void> {
-  const body = [
-    {
-      measurement: 'load_times',
-      tags: {
-        browser: data.browser,
-        cache_used: data.cacheUsed,
-        version: data.version,
-      },
-      fields: {
-        transpilation: measurements.transpilation,
-        evaluation: measurements.evaluation,
-        external_resources: measurements['external-resources'],
-        compilation: measurements.compilation,
-        boot: measurements.boot,
-        total: measurements.total,
-        dependencies: measurements.dependencies,
-      },
-    },
-  ];
-
-  if (process.env.NODE_ENV === 'development' || process.env.STAGING) {
-    // eslint-disable-next-line
-    console.log(body);
-    return Promise.resolve();
-  }
-
-  // Ignore external call for on-prem deploys
-  // @ts-ignore
-  if (window._env_?.IS_ONPREM === 'true') {
-    return Promise.resolve();
-  }
-
-  return fetch(MEASUREMENT_API, {
-    method: 'POST',
-    body: JSON.stringify(body),
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-  });
+  void data;
+  return Promise.resolve();
 }

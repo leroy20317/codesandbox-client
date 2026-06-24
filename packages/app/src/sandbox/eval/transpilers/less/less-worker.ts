@@ -31,7 +31,6 @@ self.window.document = {
   head: { appendChild: () => {}, removeChild: () => {} },
 };
 
-// self.importScripts('https://cdn.jsdelivr.net/npm/less@4.1.1/dist/less.min.js');
 const lessHost = process.env.CODESANDBOX_HOST || '';
 const lessUrl = lessHost
   ? `${lessHost}/static/js/less-4.1.2.min.js`
