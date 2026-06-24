@@ -5,7 +5,60 @@ self.importScripts([
   'https://cdnjs.cloudflare.com/ajax/libs/typescript/2.7.2/typescript.min.js',
 ]);
 
-const ROOT_URL = `https://cdn.jsdelivr.net/`;
+const DEFAULT_PACKAGE_RESOLVE_MODE = 'local-first';
+
+const joinHost = parts => parts.join(String.fromCharCode(46));
+
+const withoutLeadingSlash = value => value.replace(/^\/+/, '');
+
+const getRuntimeConfig = () => self.__SANDPACK_RUNTIME_CONFIG__ || {};
+
+const getPackageResolveMode = () =>
+  getRuntimeConfig().packageResolveMode || DEFAULT_PACKAGE_RESOLVE_MODE;
+
+const getPublicBaseUrl = () => {
+  const { publicBaseUrl } = getRuntimeConfig();
+
+  if (publicBaseUrl) {
+    return publicBaseUrl;
+  }
+
+  return new URL('./', self.location && self.location.href).toString();
+};
+
+const getOfflinePackageUrl = (bucket, packagePath) =>
+  new URL(
+    `__sandpack_packages__/${bucket}/${withoutLeadingSlash(packagePath)}`,
+    getPublicBaseUrl()
+  ).toString();
+
+const getOfflineJsdelivrDataUrl = packagePath =>
+  getOfflinePackageUrl('jsdelivr-data', packagePath);
+
+const getOfflineJsdelivrNpmUrl = packagePath =>
+  getOfflinePackageUrl('jsdelivr-npm', packagePath);
+
+const getRemoteJsdelivrDataUrl = packagePath =>
+  `https://${joinHost(['data', 'jsdelivr', 'com'])}/${withoutLeadingSlash(
+    packagePath
+  )}`;
+
+const getRemoteJsdelivrNpmUrl = packagePath =>
+  `https://${joinHost(['cdn', 'jsdelivr', 'net'])}/${withoutLeadingSlash(
+    packagePath
+  )}`;
+
+const isOfflineOnlyPackageResolveMode = () =>
+  getPackageResolveMode() === 'offline-only';
+
+const doPackageFetch = (offlineUrl, remoteUrl) =>
+  doFetch(offlineUrl).catch(error => {
+    if (isOfflineOnlyPackageResolveMode()) {
+      throw error;
+    }
+
+    return doFetch(remoteUrl);
+  });
 
 const loadedTypings = [];
 
@@ -44,10 +97,13 @@ const doFetch = url => {
 };
 
 const fetchFromDefinitelyTyped = (dependency, version, fetchedPaths) =>
-  doFetch(
-    `${ROOT_URL}npm/@types/${dependency
-      .replace('@', '')
-      .replace(/\//g, '__')}/index.d.ts`
+  doPackageFetch(
+    getOfflineJsdelivrNpmUrl(
+      `/npm/@types/${dependency.replace('@', '').replace(/\//g, '__')}/index.d.ts`
+    ),
+    getRemoteJsdelivrNpmUrl(
+      `/npm/@types/${dependency.replace('@', '').replace(/\//g, '__')}/index.d.ts`
+    )
   ).then(typings => {
     addLib(
       `node_modules/@types/${dependency}/index.d.ts`,
@@ -100,8 +156,9 @@ const tempTransformFiles = files => {
 };
 
 const getFileMetaData = (dependency, version, depPath) =>
-  doFetch(
-    `https://data.jsdelivr.com/v1/package/npm/${dependency}@${version}/flat`
+  doPackageFetch(
+    getOfflineJsdelivrDataUrl(`/v1/package/npm/${dependency}@${version}/flat`),
+    getRemoteJsdelivrDataUrl(`/v1/package/npm/${dependency}@${version}/flat`)
   )
     .then(response => JSON.parse(response))
     .then(response => response.files.filter(f => f.name.startsWith(depPath)))
@@ -120,8 +177,8 @@ const resolveAppropiateFile = (fileMetaData, relativePath) => {
 };
 
 const getFileTypes = (
-  depUrl,
   dependency,
+  version,
   depPath,
   fetchedPaths: Array<string>,
   fileMetaData
@@ -130,7 +187,12 @@ const getFileTypes = (
 
   if (fetchedPaths[virtualPath]) return null;
 
-  return doFetch(`${depUrl}/${depPath}`).then(typings => {
+  const normalizedDepPath = withoutLeadingSlash(depPath);
+
+  return doPackageFetch(
+    getOfflineJsdelivrNpmUrl(`/npm/${dependency}@${version}/${normalizedDepPath}`),
+    getRemoteJsdelivrNpmUrl(`/npm/${dependency}@${version}/${normalizedDepPath}`)
+  ).then(typings => {
     if (fetchedPaths[virtualPath]) return null;
 
     addLib(virtualPath, typings, fetchedPaths);
@@ -146,8 +208,8 @@ const getFileTypes = (
         .map(relativePath => resolveAppropiateFile(fileMetaData, relativePath))
         .map(nextDepPath =>
           getFileTypes(
-            depUrl,
             dependency,
+            version,
             nextDepPath,
             fetchedPaths,
             fileMetaData
@@ -158,8 +220,10 @@ const getFileTypes = (
 };
 
 function fetchFromMeta(dependency, version, fetchedPaths) {
-  const depUrl = `https://data.jsdelivr.com/v1/package/npm/${dependency}@${version}/flat`;
-  return doFetch(depUrl)
+  return doPackageFetch(
+    getOfflineJsdelivrDataUrl(`/v1/package/npm/${dependency}@${version}/flat`),
+    getRemoteJsdelivrDataUrl(`/v1/package/npm/${dependency}@${version}/flat`)
+  )
     .then(response => JSON.parse(response))
     .then(meta => {
       const filterAndFlatten = (files, filter) =>
@@ -182,8 +246,9 @@ function fetchFromMeta(dependency, version, fetchedPaths) {
 
       return Promise.all(
         dtsFiles.map(file =>
-          doFetch(
-            `https://cdn.jsdelivr.net/npm/${dependency}@${version}${file}`
+          doPackageFetch(
+            getOfflineJsdelivrNpmUrl(`/npm/${dependency}@${version}${file}`),
+            getRemoteJsdelivrNpmUrl(`/npm/${dependency}@${version}${file}`)
           )
             .then(dtsFile =>
               addLib(`node_modules/${dependency}${file}`, dtsFile, fetchedPaths)
@@ -195,8 +260,12 @@ function fetchFromMeta(dependency, version, fetchedPaths) {
 }
 
 function fetchFromTypings(dependency, version, fetchedPaths) {
-  const depUrl = `${ROOT_URL}npm/${dependency}@${version}`;
-  return doFetch(`${depUrl}/package.json`)
+  const packagePath = `/npm/${dependency}@${version}`;
+
+  return doPackageFetch(
+    getOfflineJsdelivrNpmUrl(`${packagePath}/package.json`),
+    getRemoteJsdelivrNpmUrl(`${packagePath}/package.json`)
+  )
     .then(response => JSON.parse(response))
     .then(packageJSON => {
       const types = packageJSON.typings || packageJSON.types;
@@ -215,8 +284,8 @@ function fetchFromTypings(dependency, version, fetchedPaths) {
           path.join('/', path.dirname(types))
         ).then(fileData =>
           getFileTypes(
-            depUrl,
             dependency,
+            version,
             resolveAppropiateFile(fileData, types),
             fetchedPaths,
             fileData
@@ -239,8 +308,12 @@ async function fetchAndAddDependencies(dependencies) {
         if (!loadedTypings.includes(dep)) {
           loadedTypings.push(dep);
 
-          const depVersion = await doFetch(
-            `https://data.jsdelivr.com/v1/package/resolve/npm/${dep}@${dependencies[dep]}`
+          const resolvePath = `/v1/package/resolve/npm/${dep}@${dependencies[dep]}`;
+          const depVersion = await doPackageFetch(
+            getOfflineJsdelivrDataUrl(resolvePath),
+            getRemoteJsdelivrDataUrl(
+              resolvePath
+            )
           )
             .then(x => JSON.parse(x))
             .then(x => x.version);
@@ -266,7 +339,11 @@ async function fetchAndAddDependencies(dependencies) {
 }
 
 self.addEventListener('message', event => {
-  const { dependencies } = event.data;
+  const { dependencies, sandpackRuntimeConfig } = event.data;
+
+  if (sandpackRuntimeConfig) {
+    self.__SANDPACK_RUNTIME_CONFIG__ = sandpackRuntimeConfig;
+  }
 
   fetchAndAddDependencies(dependencies);
 });

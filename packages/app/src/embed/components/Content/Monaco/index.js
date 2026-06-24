@@ -1131,7 +1131,10 @@ class MonacoEditor extends React.Component<Props, State> implements Editor {
           noSyntaxValidation: !this.hasNativeTypescript(),
         }
       );
-      this.typingsFetcherWorker.postMessage({ dependencies });
+      this.typingsFetcherWorker.postMessage({
+        dependencies,
+        sandpackRuntimeConfig: window.__SANDPACK_RUNTIME_CONFIG__,
+      });
     }
   };
 

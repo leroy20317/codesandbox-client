@@ -9,4 +9,4 @@ services:
     environment:
       - SANDPACK_PACKAGE_RESOLVE_MODE=offline-only
     ports:
-      - '8080:80'
+      - '9801:80'

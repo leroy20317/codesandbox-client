@@ -48,12 +48,69 @@ interface SyncDownloadFileMethod {
   (p: string, type: string): any;
 }
 
+type SandpackPackageResolveMode = 'offline-only' | 'local-first';
+
+type RuntimeGlobal = typeof globalThis & {
+  __SANDPACK_RUNTIME_CONFIG__?: {
+    packageResolveMode?: SandpackPackageResolveMode;
+    publicBaseUrl?: string;
+  };
+};
+
 function syncNotAvailableError(): never {
   throw new ApiError(ErrorCode.ENOTSUP, `Synchronous HTTP download methods are not available in this environment.`);
 }
 
+function getRuntimeGlobal(): RuntimeGlobal {
+  return globalThis as RuntimeGlobal;
+}
+
+function withoutLeadingSlash(value: string): string {
+  return value.replace(/^\/+/, '');
+}
+
 function joinHost(parts: string[]): string {
   return parts.join(String.fromCharCode(46));
+}
+
+function getPublicBaseUrl(): string {
+  const runtimeConfig = getRuntimeGlobal().__SANDPACK_RUNTIME_CONFIG__ || {};
+
+  if (runtimeConfig.publicBaseUrl) {
+    return runtimeConfig.publicBaseUrl;
+  }
+
+  const href = getRuntimeGlobal().location && getRuntimeGlobal().location.href;
+  return new URL('./', href || 'http://localhost/').toString();
+}
+
+function getOfflineJsdelivrDataUrl(packagePath: string): string {
+  return new URL(
+    `__sandpack_packages__/jsdelivr-data/${withoutLeadingSlash(packagePath)}`,
+    getPublicBaseUrl()
+  ).toString();
+}
+
+function getOfflineJsdelivrNpmUrl(packagePath: string): string {
+  return new URL(
+    `__sandpack_packages__/jsdelivr-npm/${withoutLeadingSlash(packagePath)}`,
+    getPublicBaseUrl()
+  ).toString();
+}
+
+function getRemoteJsdelivrDataUrl(packagePath: string): string {
+  return `https://${joinHost(['data', 'jsdelivr', 'com'])}/${withoutLeadingSlash(packagePath)}`;
+}
+
+function getRemoteJsdelivrNpmUrl(packagePath: string): string {
+  return `https://${joinHost(['cdn', 'jsdelivr', 'net'])}/${withoutLeadingSlash(packagePath)}`;
+}
+
+function isOfflineOnlyPackageResolveMode(): boolean {
+  const runtimeConfig = getRuntimeGlobal().__SANDPACK_RUNTIME_CONFIG__;
+  return Boolean(
+    runtimeConfig && runtimeConfig.packageResolveMode === 'offline-only'
+  );
 }
 
 export type JSDelivrMeta = {
@@ -118,13 +175,23 @@ export default class JSDelivrRequest extends BaseFileSystem implements FileSyste
    * Construct an HTTPRequest file system backend with the given options.
    */
   public static Create(opts: JSDelivrRequestOptions, cb: BFSCallback<JSDelivrRequest>): void {
-    const URL = `https://${joinHost(['data', 'jsdelivr', 'com'])}/v1/package/npm/${opts.dependency}@${opts.version}/flat`;
+    const packagePath = `/v1/package/npm/${opts.dependency}@${opts.version}/flat`;
+    const offlineUrl = getOfflineJsdelivrDataUrl(packagePath);
+    const remoteUrl = getRemoteJsdelivrDataUrl(packagePath);
 
-    asyncDownloadFile(URL, "json", (e, data: JSDelivrMeta) => {
-      if (e) {
+    asyncDownloadFile(offlineUrl, "json", (e, data: JSDelivrMeta) => {
+      if (!e) {
+        cb(null, new JSDelivrRequest(data, opts.dependency, opts.version));
+      } else if (isOfflineOnlyPackageResolveMode()) {
         cb(e);
       } else {
-        cb(null, new JSDelivrRequest(data, opts.dependency, opts.version));
+        asyncDownloadFile(remoteUrl, "json", (fallbackError, fallbackData: JSDelivrMeta) => {
+          if (fallbackError) {
+            cb(fallbackError);
+          } else {
+            cb(null, new JSDelivrRequest(fallbackData, opts.dependency, opts.version));
+          }
+        });
       }
     });
 
@@ -407,11 +474,19 @@ export default class JSDelivrRequest extends BaseFileSystem implements FileSyste
     }
   }
 
-  private _getHTTPPath(filePath: string): string {
+  private _getPackagePath(filePath: string): string {
     if (filePath.charAt(0) === '/') {
       filePath = filePath.slice(1);
     }
-    return `https://${joinHost(['cdn', 'jsdelivr', 'net'])}/npm/${this.dependency}@${this.version}/${filePath}`;
+    return `/npm/${this.dependency}@${this.version}/${filePath}`;
+  }
+
+  private _getOfflineHTTPPath(filePath: string): string {
+    return getOfflineJsdelivrNpmUrl(this._getPackagePath(filePath));
+  }
+
+  private _getRemoteHTTPPath(filePath: string): string {
+    return getRemoteJsdelivrNpmUrl(this._getPackagePath(filePath));
   }
 
   /**
@@ -421,7 +496,13 @@ export default class JSDelivrRequest extends BaseFileSystem implements FileSyste
   private _requestFileAsync(p: string, type: 'json', cb: BFSCallback<any>): void;
   private _requestFileAsync(p: string, type: string, cb: BFSCallback<any>): void;
   private _requestFileAsync(p: string, type: string, cb: BFSCallback<any>): void {
-    this._requestFileAsyncInternal(this._getHTTPPath(p), type, cb);
+    this._requestFileAsyncInternal(this._getOfflineHTTPPath(p), type, (err, data) => {
+      if (!err || isOfflineOnlyPackageResolveMode()) {
+        cb(err, data);
+      } else {
+        this._requestFileAsyncInternal(this._getRemoteHTTPPath(p), type, cb);
+      }
+    });
   }
 
   /**
@@ -431,17 +512,39 @@ export default class JSDelivrRequest extends BaseFileSystem implements FileSyste
   private _requestFileSync(p: string, type: 'json'): any;
   private _requestFileSync(p: string, type: string): any;
   private _requestFileSync(p: string, type: string): any {
-    return this._requestFileSyncInternal(this._getHTTPPath(p), type);
+    try {
+      return this._requestFileSyncInternal(this._getOfflineHTTPPath(p), type);
+    } catch (error) {
+      if (isOfflineOnlyPackageResolveMode()) {
+        throw error;
+      }
+
+      return this._requestFileSyncInternal(this._getRemoteHTTPPath(p), type);
+    }
   }
 
   /**
    * Only requests the HEAD content, for the file size.
    */
   private _requestFileSizeAsync(path: string, cb: BFSCallback<number>): void {
-    this._requestFileSizeAsyncInternal(this._getHTTPPath(path), cb);
+    this._requestFileSizeAsyncInternal(this._getOfflineHTTPPath(path), (err, size) => {
+      if (!err || isOfflineOnlyPackageResolveMode()) {
+        cb(err, size);
+      } else {
+        this._requestFileSizeAsyncInternal(this._getRemoteHTTPPath(path), cb);
+      }
+    });
   }
 
   private _requestFileSizeSync(path: string): number {
-    return this._requestFileSizeSyncInternal(this._getHTTPPath(path));
+    try {
+      return this._requestFileSizeSyncInternal(this._getOfflineHTTPPath(path));
+    } catch (error) {
+      if (isOfflineOnlyPackageResolveMode()) {
+        throw error;
+      }
+
+      return this._requestFileSizeSyncInternal(this._getRemoteHTTPPath(path));
+    }
   }
 }

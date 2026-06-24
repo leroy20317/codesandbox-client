@@ -123,7 +123,7 @@ async function downloadPackage(name, version) {
     throw new Error(`Invalid jsDelivr flat response for ${spec}`);
   }
 
-  const CONCURRENCY = 50;
+  const CONCURRENCY = 100;
   const validFiles = flat.files.filter(
     file => file && typeof file.name === 'string'
   );

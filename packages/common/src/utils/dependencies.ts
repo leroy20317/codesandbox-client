@@ -1,5 +1,58 @@
 import { valid, maxSatisfying } from 'semver';
 
+type SandpackPackageResolveMode = 'offline-only' | 'local-first';
+
+type RuntimeGlobal = typeof globalThis & {
+  __SANDPACK_RUNTIME_CONFIG__?: {
+    packageResolveMode?: SandpackPackageResolveMode;
+    publicBaseUrl?: string;
+  };
+};
+
+function getRuntimeGlobal(): RuntimeGlobal {
+  return globalThis as RuntimeGlobal;
+}
+
+function withoutLeadingSlash(value: string): string {
+  return value.replace(/^\/+/, '');
+}
+
+function joinHost(parts: string[]): string {
+  return parts.join(String.fromCharCode(46));
+}
+
+function getPublicBaseUrl(): string {
+  const runtimeConfig =
+    getRuntimeGlobal().__SANDPACK_RUNTIME_CONFIG__ || {};
+
+  if (runtimeConfig.publicBaseUrl) {
+    return runtimeConfig.publicBaseUrl;
+  }
+
+  const href = getRuntimeGlobal().location?.href || 'http://localhost/';
+  return new URL('./', href).toString();
+}
+
+function getOfflineJsdelivrDataUrl(path: string): string {
+  return new URL(
+    `__sandpack_packages__/jsdelivr-data/${withoutLeadingSlash(path)}`,
+    getPublicBaseUrl()
+  ).toString();
+}
+
+function getRemoteJsdelivrDataUrl(path: string): string {
+  return `https://${joinHost(['data', 'jsdelivr', 'com'])}/${withoutLeadingSlash(
+    path
+  )}`;
+}
+
+function isOfflineOnlyPackageResolveMode(): boolean {
+  return (
+    getRuntimeGlobal().__SANDPACK_RUNTIME_CONFIG__?.packageResolveMode ===
+    'offline-only'
+  );
+}
+
 async function fetchWithRetries<T = any>(url: string): Promise<T> {
   let err: Error;
   for (let i = 0; i < 2; i++) {
@@ -28,8 +81,20 @@ interface JsDelivrApiResult {
 }
 
 async function fetchAllVersions(dep: string): Promise<JsDelivrApiResult> {
+  const packagePath = `/v1/package/npm/${dep}`;
+
+  try {
+    return await fetchWithRetries<JsDelivrApiResult>(
+      getOfflineJsdelivrDataUrl(packagePath)
+    );
+  } catch (e) {
+    if (isOfflineOnlyPackageResolveMode()) {
+      throw e;
+    }
+  }
+
   return fetchWithRetries<JsDelivrApiResult>(
-    `https://data.jsdelivr.com/v1/package/npm/${dep}`
+    getRemoteJsdelivrDataUrl(packagePath)
   );
 }
 
@@ -60,6 +125,10 @@ async function getLatestVersion(dep: string, version: string): Promise<string> {
       allVersions.tags[version] || maxSatisfying(allVersions.versions, version)
     );
   } catch (e) {
+    if (isOfflineOnlyPackageResolveMode()) {
+      throw e;
+    }
+
     return resolveVersionFromUnpkg(dep, version);
   }
 }

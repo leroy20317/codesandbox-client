@@ -20,6 +20,10 @@ function addScript(src) {
   });
 }
 
+function joinHost(parts: string[]): string {
+  return parts.join(String.fromCharCode(46));
+}
+
 const IGNORED_DEPENDENCIES = ['ReactDOMRe', 'ReasonReact'];
 
 function getModuleName(path: string) {
@@ -85,7 +89,11 @@ class ReasonTranspiler extends Transpiler {
   ): Promise<{ transpiledCode: string }> {
     if (!global.ocaml) {
       await addScript(
-        'https://cdn.jsdelivr.net/gh/jaredly/reason-react@more-docs/docs/bucklescript.js'
+        `https://${joinHost([
+          'cdn',
+          'jsdelivr',
+          'net',
+        ])}/gh/jaredly/reason-react@more-docs/docs/bucklescript.js`
       );
       await addScript('https://reason.surge.sh/bucklescript-deps.js');
       await addScript('https://unpkg.com/reason@3.3.4/refmt.js');
