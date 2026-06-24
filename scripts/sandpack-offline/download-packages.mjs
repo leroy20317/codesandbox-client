@@ -111,7 +111,7 @@ async function downloadJson(url) {
 async function downloadPackage(name, version) {
   const spec = packageSpec(name, version);
 
-  console.log(`Downloading ${spec}`);
+  console.log(`[${spec}] Fetching metadata...`);
 
   const metadataUrl = `${CODESANDBOX_PACKAGE_BASE}/v2/packages/${name}/${version}.json`;
   await downloadToFile(metadataUrl);
@@ -128,6 +128,9 @@ async function downloadPackage(name, version) {
     file => file && typeof file.name === 'string'
   );
 
+  console.log(`[${spec}] Downloading ${validFiles.length} files...`);
+
+  let downloaded = 0;
   for (let i = 0; i < validFiles.length; i += CONCURRENCY) {
     const batch = validFiles.slice(i, i + CONCURRENCY);
     await Promise.all(
@@ -138,6 +141,8 @@ async function downloadPackage(name, version) {
         return downloadToFile(fileUrl);
       })
     );
+    downloaded += batch.length;
+    console.log(`[${spec}] Progress: ${downloaded}/${validFiles.length} files`);
   }
 
   console.log(`✓ Completed ${spec}`);
@@ -164,16 +169,25 @@ async function main() {
 
   const PACKAGE_CONCURRENCY = 5;
   const packageEntries = Object.entries(packages);
+  const totalPackages = packageEntries.length;
+
+  console.log(`Starting download of ${totalPackages} packages...\n`);
+
+  let completedPackages = 0;
 
   for (let i = 0; i < packageEntries.length; i += PACKAGE_CONCURRENCY) {
     const batch = packageEntries.slice(i, i + PACKAGE_CONCURRENCY);
     await Promise.all(
-      batch.map(([name, version]) => downloadPackage(name, version))
+      batch.map(async ([name, version]) => {
+        await downloadPackage(name, version);
+        completedPackages++;
+        console.log(`\n📦 Overall progress: ${completedPackages}/${totalPackages} packages completed\n`);
+      })
     );
   }
 
   await writeManifest(packages);
-  console.log(`\n✓ All packages downloaded to ${OFFLINE_DIR}`);
+  console.log(`✓ All ${totalPackages} packages downloaded to ${OFFLINE_DIR}`);
 }
 
 main().catch(error => {
