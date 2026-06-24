@@ -1,5 +1,11 @@
 import { FetchProtocol, Meta } from '../fetch-npm-module';
 import { fetchWithRetries } from './utils';
+import {
+  createOfflinePackageError,
+  getOfflineJsdelivrDataUrl,
+  getRemoteGithubApiUrl,
+  isOfflineOnlyPackageResolveMode,
+} from '../../offline/runtime-config';
 
 type GistAPIResponse = {
   path: string;
@@ -35,12 +41,18 @@ export class GistFetcher implements FetchProtocol {
 
   getAPIURl(version: string) {
     const gistId = version.replace(/.*\//, '');
-    return 'https://api.github.com/gists/' + gistId;
+    return getRemoteGithubApiUrl(`/gists/${gistId}`);
   }
 
   private async fetchGist(version: string) {
     if (this.fetchedGists[version]) {
       return this.fetchedGists[version];
+    }
+
+    if (isOfflineOnlyPackageResolveMode()) {
+      throw createOfflinePackageError(
+        getOfflineJsdelivrDataUrl(`/v1/package/gh/gist/${version}/flat`)
+      );
     }
 
     const url = this.getAPIURl(version);

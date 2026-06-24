@@ -1,6 +1,6 @@
 /* eslint-disable import/default */
 // @ts-ignore
-import BabelWorker from 'worker-loader?publicPath=/&name=babel-transpiler.[hash:8].worker.js!./eval/transpilers/babel/worker/index';
+import BabelWorker from 'worker-loader?publicPath=./&name=babel-transpiler.[hash:8].worker.js!./eval/transpilers/babel/worker/index';
 /* eslint-enable import/default */
 import hookConsole from 'sandbox-hooks/console';
 import setupHistoryListeners from 'sandbox-hooks/url-listeners';
@@ -19,11 +19,16 @@ function prefetchScript(url) {
   document.head.appendChild(preloadLink);
 }
 
-prefetchScript(
-  `${
-    process.env.CODESANDBOX_HOST || ''
-  }/static/js/babel.${BABEL7_VERSION}.min.js`
-);
+function getSandboxAssetUrl(assetPath: string) {
+  const host = process.env.CODESANDBOX_HOST || '';
+  if (host) {
+    return `${host}/${assetPath.replace(/^\/+/, '')}`;
+  }
+
+  return new URL(assetPath.replace(/^\/+/, ''), window.location.href).toString();
+}
+
+prefetchScript(getSandboxAssetUrl(`/static/js/babel.${BABEL7_VERSION}.min.js`));
 
 // Preload first babel worker, this will ensure the worker is in the browser cache when we need it
 globalThis.babelworkers = [BabelWorker()];

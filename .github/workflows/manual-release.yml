@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release tag, for example v1.0.0"
+        description: 'Release tag, for example v1.0.0'
         required: true
         type: string
 
 permissions:
   contents: write
+  packages: write
 
 concurrency:
   group: manual-release-${{ github.ref }}
@@ -17,8 +18,11 @@ concurrency:
 
 jobs:
   release:
-    name: Build and release Sandpack bundler
+    name: Build and release offline Sandpack bundler
     runs-on: ubuntu-latest
+
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/sandpack-bundler
 
     steps:
       - name: Checkout repository
@@ -44,7 +48,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-          cache: yarn
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
@@ -55,17 +58,124 @@ jobs:
       - name: Build Sandpack bundler
         run: yarn build:sandpack
 
-      - name: Package build output
+      - name: Download offline npm package mirror
+        run: yarn sandpack:offline:download
+
+      - name: Verify offline npm package mirror
+        run: yarn sandpack:offline:verify
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Validate Docker build inputs
+        run: |
+          test -d www
+          test -f www/index.html
+          test -f offline-packages/manifest.json
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/sandpack-offline/Dockerfile
+          load: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ inputs.tag_name }}
+            ${{ env.IMAGE_NAME }}:latest
+
+      - name: Smoke test Docker image
         env:
           TAG_NAME: ${{ inputs.tag_name }}
         run: |
-          test -d www
+          docker run -d \
+            --name sandpack-bundler-test \
+            -p 18080:80 \
+            "$IMAGE_NAME:$TAG_NAME"
 
-          test -f www/index.html
+          sleep 3
 
-          ASSET_BASENAME="sandpack-bundler-$TAG_NAME"
-          tar -czf "$ASSET_BASENAME.tar.gz" www
-          zip -r "$ASSET_BASENAME.zip" www
+          curl -f http://127.0.0.1:18080/__sandpack_config__.js
+          curl -f http://127.0.0.1:18080/__sandpack_packages__/manifest.json
+          curl -s http://127.0.0.1:18080/__sandpack_config__.js | grep "local-first"
+
+          docker logs sandpack-bundler-test
+          docker rm -f sandpack-bundler-test
+
+      - name: Push Docker image
+        env:
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          docker push "$IMAGE_NAME:$TAG_NAME"
+          docker push "$IMAGE_NAME:latest"
+
+      - name: Prepare release assets
+        env:
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          mkdir -p release-assets
+
+          cp offline-packages/manifest.json release-assets/manifest.json
+
+          cat > release-assets/docker-compose.yml <<EOF
+          services:
+            sandpack-bundler:
+              image: sandpack-bundler:$TAG_NAME
+              pull_policy: never
+              container_name: sandpack-bundler
+              restart: unless-stopped
+              ports:
+                - "8080:80"
+          EOF
+
+          cat > release-assets/.env.example <<'EOF'
+          # Optional. Defaults to local-first.
+          # Available values: offline-only, local-first
+          SANDPACK_PACKAGE_RESOLVE_MODE=local-first
+          EOF
+
+          cat > release-assets/README-DEPLOY.md <<EOF
+          # Sandpack Bundler $TAG_NAME
+
+          GHCR image:
+
+          \`\`\`text
+          $IMAGE_NAME:$TAG_NAME
+          \`\`\`
+
+          ## Export image for private deployment
+
+          \`\`\`bash
+          docker pull $IMAGE_NAME:$TAG_NAME
+          docker tag $IMAGE_NAME:$TAG_NAME sandpack-bundler:$TAG_NAME
+          docker save sandpack-bundler:$TAG_NAME | gzip > sandpack-bundler-$TAG_NAME.tar.gz
+          \`\`\`
+
+          ## Load image on private server
+
+          \`\`\`bash
+          gunzip -c sandpack-bundler-$TAG_NAME.tar.gz | docker load
+          docker compose up -d
+          \`\`\`
+
+          Consumer applications should point to the bundler service:
+
+          \`\`\`env
+          SANDPACK_BUNDLER_URL=http://<internal-host>:8080/
+          \`\`\`
+
+          For sub-path reverse proxy deployments, keep the trailing slash:
+
+          \`\`\`env
+          SANDPACK_BUNDLER_URL=https://example.com/sandpack-bundler/
+          \`\`\`
+          EOF
 
       - name: Create GitHub Release
         env:
@@ -73,8 +183,10 @@ jobs:
           TAG_NAME: ${{ inputs.tag_name }}
         run: |
           gh release create "$TAG_NAME" \
-            "sandpack-bundler-$TAG_NAME.tar.gz" \
-            "sandpack-bundler-$TAG_NAME.zip" \
+            "release-assets/manifest.json" \
+            "release-assets/docker-compose.yml" \
+            "release-assets/.env.example" \
+            "release-assets/README-DEPLOY.md" \
             --target "$GITHUB_SHA" \
             --title "$TAG_NAME" \
-            --notes "Manual Sandpack bundler release for $TAG_NAME."
+            --notes "Sandpack bundler Docker image: $IMAGE_NAME:$TAG_NAME"

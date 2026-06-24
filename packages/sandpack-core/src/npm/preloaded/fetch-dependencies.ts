@@ -6,6 +6,14 @@ import delay from '../../utils/delay';
 import dependenciesToQuery, {
   normalizeVersion,
 } from '../dependencies-to-query';
+import {
+  createOfflinePackageError,
+  fetchOfflinePackage,
+  getOfflineCodesandboxUrl,
+  getRemoteCodesandboxBucketUrl,
+  getRemoteCodesandboxPackagerUrl,
+  isOfflineOnlyPackageResolveMode,
+} from '../offline/runtime-config';
 
 const RETRY_COUNT = 60;
 const MAX_RETRY_DELAY = 10_000;
@@ -13,22 +21,9 @@ const debug = _debug('cs:sandbox:packager');
 
 const VERSION = 2;
 
-// eslint-disable-next-line
-const DEV_URLS = {
-  packager:
-    'https://xi5p9f7czk.execute-api.eu-west-1.amazonaws.com/dev/packages',
-  bucket: 'https://dev-packager-packages.codesandbox.io',
-};
-// eslint-disable-next-line
-const PROD_URLS = {
-  packager:
-    'https://aiwi8rnkp5.execute-api.eu-west-1.amazonaws.com/prod/packages',
-  bucket: 'https://prod-packager-packages.codesandbox.io',
-};
-
-const URLS = PROD_URLS;
-const BUCKET_URL = URLS.bucket;
-const PACKAGER_URL = URLS.packager;
+const REMOTE_ENV = 'prod';
+const BUCKET_URL = getRemoteCodesandboxBucketUrl(REMOTE_ENV);
+const PACKAGER_URL = getRemoteCodesandboxPackagerUrl(REMOTE_ENV);
 
 function callApi(url: string, method = 'GET') {
   return fetch(url, {
@@ -101,19 +96,34 @@ export async function getDependency(
   depVersion: string
 ): Promise<ILambdaResponse> {
   let version = depVersion;
-  try {
-    const { version: absoluteVersion } = await getAbsoluteDependency(
-      depName,
-      depVersion
-    );
-    version = absoluteVersion;
-  } catch (e) {
-    /* Ignore this, not critical */
+  if (!isOfflineOnlyPackageResolveMode()) {
+    try {
+      const { version: absoluteVersion } = await getAbsoluteDependency(
+        depName,
+        depVersion
+      );
+      version = absoluteVersion;
+    } catch (e) {
+      /* Ignore this, not critical */
+    }
   }
 
   const normalizedVersion = normalizeVersion(version);
   const dependencyUrl = dependenciesToQuery({ [depName]: normalizedVersion });
-  const fullUrl = `${BUCKET_URL}/v${VERSION}/packages/${depName}/${normalizedVersion}.json`;
+  const manifestPath = `/v${VERSION}/packages/${depName}/${normalizedVersion}.json`;
+  const offlineUrl = getOfflineCodesandboxUrl(manifestPath);
+  const fullUrl = `${BUCKET_URL}${manifestPath}`;
+
+  try {
+    const bucketManifest = await fetchOfflinePackage(offlineUrl).then(x =>
+      x.json()
+    );
+    return bucketManifest;
+  } catch (e) {
+    if (isOfflineOnlyPackageResolveMode()) {
+      throw createOfflinePackageError(offlineUrl);
+    }
+  }
 
   try {
     const bucketManifest = await callApi(fullUrl);

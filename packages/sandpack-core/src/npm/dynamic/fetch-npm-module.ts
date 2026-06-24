@@ -13,6 +13,7 @@ import {
   invalidatePackageFromCache,
   resolveAsync,
 } from '../../resolver/resolver';
+import { isOfflineOnlyPackageResolveMode } from '../offline/runtime-config';
 
 export type Meta = {
   [path: string]: true;
@@ -157,6 +158,10 @@ export function downloadDependency(
   const newPkg = protocol
     .file(nameWithoutAlias, depVersion, relativePath)
     .catch(async () => {
+      if (isOfflineOnlyPackageResolveMode()) {
+        throw new DependencyNotFoundError(nameWithoutAlias);
+      }
+
       const fallbackProtocol = getFetchProtocol(
         nameWithoutAlias,
         depVersion,
@@ -407,6 +412,10 @@ export async function fetchModule(
   try {
     meta = await getMeta(dependencyName, packageJSONPath, version);
   } catch (e) {
+    if (isOfflineOnlyPackageResolveMode()) {
+      throw e;
+    }
+
     // Use fallback
     meta = await getMeta(dependencyName, packageJSONPath, version, true);
   }

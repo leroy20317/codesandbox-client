@@ -1,0 +1,12 @@
+services:
+  sandpack-bundler:
+    # The image is expected to be loaded with `docker load` before deployment.
+    # Runtime defaults to SANDPACK_PACKAGE_RESOLVE_MODE=local-first.
+    image: sandpack-bundler:1.0.0
+    pull_policy: never
+    container_name: sandpack-bundler
+    restart: unless-stopped
+    environment:
+      - SANDPACK_PACKAGE_RESOLVE_MODE=offline-only
+    ports:
+      - '8080:80'

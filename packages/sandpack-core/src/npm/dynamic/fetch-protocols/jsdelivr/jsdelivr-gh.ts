@@ -1,6 +1,16 @@
 import { FetchProtocol, Meta } from '../../fetch-npm-module';
 import { fetchWithRetries } from '../utils';
 import { JSDelivrMeta, normalizeJSDelivr } from './utils';
+import {
+  createOfflinePackageError,
+  fetchOfflinePackage,
+  getOfflineJsdelivrDataUrl,
+  getOfflineJsdelivrNpmUrl,
+  getRemoteGithubApiUrl,
+  getRemoteJsdelivrDataUrl,
+  getRemoteJsdelivrNpmUrl,
+  isOfflineOnlyPackageResolveMode,
+} from '../../../offline/runtime-config';
 
 /**
  * Converts urls like "https://github.com/user/repo.git" to "user/repo".
@@ -26,9 +36,18 @@ export function isGithubDependency(ghUrl: string) {
 
 export class JSDelivrGHFetcher implements FetchProtocol {
   async file(name: string, version: string, path: string): Promise<string> {
-    const url = `https://cdn.jsdelivr.net/gh/${convertGitHubURLToVersion(
-      version
-    )}${path}`;
+    const packagePath = `/gh/${convertGitHubURLToVersion(version)}${path}`;
+    const offlineUrl = getOfflineJsdelivrNpmUrl(packagePath);
+
+    try {
+      return await fetchOfflinePackage(offlineUrl).then(x => x.text());
+    } catch (e) {
+      if (isOfflineOnlyPackageResolveMode()) {
+        throw createOfflinePackageError(offlineUrl);
+      }
+    }
+
+    const url = getRemoteJsdelivrNpmUrl(packagePath);
     const result = await fetchWithRetries(url).then(x => x.text());
 
     return result;
@@ -42,20 +61,44 @@ export class JSDelivrGHFetcher implements FetchProtocol {
     // If the version is not specified, we use the default_branch from the repo meta
     let metaBranch = repoVersion;
     if (!metaBranch) {
-      metaBranch = await fetch(`https://api.github.com/repos/${repo}`)
+      if (isOfflineOnlyPackageResolveMode()) {
+        throw createOfflinePackageError(
+          getOfflineJsdelivrDataUrl(`/v1/package/gh/${repo}/flat`)
+        );
+      }
+
+      metaBranch = await fetch(getRemoteGithubApiUrl(`/repos/${repo}`))
         .then(x => x.json())
         .then(x => x.default_branch);
     }
 
     // We get the sha of the requested version
-    const sha = await fetch(
-      `https://api.github.com/repos/${repo}/commits/${metaBranch}`
-    )
+    if (isOfflineOnlyPackageResolveMode()) {
+      throw createOfflinePackageError(
+        getOfflineJsdelivrDataUrl(`/v1/package/gh/${repo}@${metaBranch}/flat`)
+      );
+    }
+
+    const sha = await fetch(getRemoteGithubApiUrl(`/repos/${repo}/commits/${metaBranch}`))
       .then(x => x.json())
       .then(x => x.sha);
 
-    const url = `https://data.jsdelivr.com/v1/package/gh/${repo}@${sha}/flat`;
+    const metaPath = `/v1/package/gh/${repo}@${sha}/flat`;
+    const offlineUrl = getOfflineJsdelivrDataUrl(metaPath);
 
+    try {
+      const result: JSDelivrMeta = await fetchOfflinePackage(offlineUrl).then(
+        x => x.json()
+      );
+
+      return normalizeJSDelivr(result.files, {});
+    } catch (e) {
+      if (isOfflineOnlyPackageResolveMode()) {
+        throw createOfflinePackageError(offlineUrl);
+      }
+    }
+
+    const url = getRemoteJsdelivrDataUrl(metaPath);
     const result: JSDelivrMeta = await fetchWithRetries(url).then(x =>
       x.json()
     );

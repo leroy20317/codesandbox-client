@@ -585,6 +585,15 @@ async function compile(opts: any) {
 }
 
 try {
+  const getSandboxAssetUrl = assetPath => {
+    const host = process.env.CODESANDBOX_HOST || '';
+    if (host) {
+      return `${host}/${assetPath.replace(/^\/+/, '')}`;
+    }
+
+    return new URL(assetPath.replace(/^\/+/, ''), self.location.href).toString();
+  };
+
   // Rollup globals hardcoded in Babel
   // @ts-ignore
   self.path$2 = BrowserFS.BFSRequire('path');
@@ -593,12 +602,8 @@ try {
 
   self.importScripts(
     process.env.NODE_ENV === 'development'
-      ? `${
-          process.env.CODESANDBOX_HOST || ''
-        }/static/js/babel.${BABEL7_VERSION}.js`
-      : `${
-          process.env.CODESANDBOX_HOST || ''
-        }/static/js/babel.${BABEL7_VERSION}.min.js`
+      ? getSandboxAssetUrl(`/static/js/babel.${BABEL7_VERSION}.js`)
+      : getSandboxAssetUrl(`/static/js/babel.${BABEL7_VERSION}.min.js`)
   );
 
   remapBabelHack();

@@ -32,9 +32,12 @@ self.window.document = {
 };
 
 // self.importScripts('https://cdn.jsdelivr.net/npm/less@4.1.1/dist/less.min.js');
-self.importScripts(
-  `${process.env.CODESANDBOX_HOST || ''}/static/js/less-4.1.2.min.js`
-);
+const lessHost = process.env.CODESANDBOX_HOST || '';
+const lessUrl = lessHost
+  ? `${lessHost}/static/js/less-4.1.2.min.js`
+  : new URL('static/js/less-4.1.2.min.js', self.location.href).toString();
+
+self.importScripts(lessUrl);
 
 interface ILessCompileOptions {
   code: string;

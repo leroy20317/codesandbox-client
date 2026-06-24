@@ -41,6 +41,8 @@
     "build:components": "lerna run build:dev --scope @codesandbox/components --stream",
     "build:deps": "lerna run build:dev",
     "build:sandpack": "lerna run build:sandpack-sandbox --scope app --stream",
+    "sandpack:offline:download": "node scripts/sandpack-offline/download-packages.mjs",
+    "sandpack:offline:verify": "node scripts/sandpack-offline/verify-offline.mjs",
     "build:embed": "lerna run build:embed --scope app --stream && gulp",
     "build:prod": "lerna run build --scope app --stream && lerna run copy-assets --scope app --stream",
     "commit": "concurrently \"yarn typecheck\" \"yarn lint\" && git commit -m",
