@@ -53,12 +53,21 @@ function addScript(src: string) {
   });
 }
 
+function getSandboxAssetUrl(assetPath: string) {
+  const host = process.env.CODESANDBOX_HOST || '';
+  if (host) {
+    return `${host}/${assetPath.replace(/^\/+/, '')}`;
+  }
+
+  return new URL(assetPath.replace(/^\/+/, ''), window.location.href).toString();
+}
+
 let jsdomPromise = null;
 /**
  * Load JSDOM while the sandbox loads. Before we run a test we make sure that this has been loaded.
  */
 const getJSDOM = () => {
-  let jsdomPath = '/static/js/jsdom-16.3.0.min.js';
+  let jsdomPath = getSandboxAssetUrl('/static/js/jsdom-16.3.0.min.js');
   if (
     navigator.userAgent.indexOf('jsdom') !== -1 &&
     process.env.NODE_ENV === 'test'

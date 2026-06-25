@@ -46,6 +46,15 @@ const childHandler = new ChildHandler('babel-worker');
 const IGNORED_MODULES = ['util', 'os'];
 const { BrowserFS } = self;
 
+const getSandboxAssetUrl = assetPath => {
+  const host = process.env.CODESANDBOX_HOST || '';
+  if (host) {
+    return `${host}/${assetPath.replace(/^\/+/, '')}`;
+  }
+
+  return new URL(assetPath.replace(/^\/+/, ''), self.location.href).toString();
+};
+
 // Default in memory
 BrowserFS.configure({ fs: 'InMemory' }, () => {});
 
@@ -585,15 +594,6 @@ async function compile(opts: any) {
 }
 
 try {
-  const getSandboxAssetUrl = assetPath => {
-    const host = process.env.CODESANDBOX_HOST || '';
-    if (host) {
-      return `${host}/${assetPath.replace(/^\/+/, '')}`;
-    }
-
-    return new URL(assetPath.replace(/^\/+/, ''), self.location.href).toString();
-  };
-
   // Rollup globals hardcoded in Babel
   // @ts-ignore
   self.path$2 = BrowserFS.BFSRequire('path');
@@ -646,9 +646,7 @@ async function initBabel(opts) {
   if (babelUrl || babelEnvUrl) {
     loadCustomTranspiler(babelUrl, babelEnvUrl);
   } else if (version !== 7) {
-    loadCustomTranspiler(
-      `${process.env.CODESANDBOX_HOST || ''}/static/js/babel.6.26.min.js`
-    );
+    loadCustomTranspiler(getSandboxAssetUrl('/static/js/babel.6.26.min.js'));
   }
 
   const stringifiedConfig = JSON.stringify(babelTranspilerOptions);
