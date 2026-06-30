@@ -17,6 +17,7 @@ const JSDELIVR_DATA_BASE = 'https://data.jsdelivr.com';
 const JSDELIVR_NPM_BASE = 'https://cdn.jsdelivr.net';
 
 const REQUEST_RETRIES = 3;
+const SHOULD_CLEAN = process.argv.includes('--clean');
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -94,7 +95,20 @@ async function readJson(filePath) {
   return JSON.parse(await fs.readFile(filePath, 'utf8'));
 }
 
+async function pathExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function downloadToFile(url, localPath = mapUrlToLocalPath(url)) {
+  if (await pathExists(localPath)) {
+    return localPath;
+  }
+
   await fs.mkdir(path.dirname(localPath), { recursive: true });
 
   const response = await request(url);
@@ -165,7 +179,9 @@ async function main() {
   const config = await readJson(ALLOWED_PACKAGES_PATH);
   const packages = config.dependencies || {};
 
-  await fs.rm(OFFLINE_DIR, { recursive: true, force: true });
+  if (SHOULD_CLEAN) {
+    await fs.rm(OFFLINE_DIR, { recursive: true, force: true });
+  }
 
   const PACKAGE_CONCURRENCY = 5;
   const packageEntries = Object.entries(packages);

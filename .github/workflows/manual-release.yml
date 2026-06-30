@@ -59,12 +59,6 @@ jobs:
       - name: Build Sandpack bundler
         run: yarn build:sandpack
 
-      - name: Download offline npm package mirror
-        run: yarn sandpack:offline:download
-
-      - name: Verify offline npm package mirror
-        run: yarn sandpack:offline:verify
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -74,6 +68,24 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
+
+      - name: Restore offline packages from previous image
+        run: |
+          if docker pull "$IMAGE_NAME:latest"; then
+            container_id="$(docker create "$IMAGE_NAME:latest")"
+            trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
+
+            rm -rf offline-packages
+            docker cp "$container_id:/usr/share/nginx/html/__sandpack_packages__" offline-packages
+          else
+            echo "No previous latest image found; downloading offline packages from scratch."
+          fi
+
+      - name: Download offline npm package mirror
+        run: yarn sandpack:offline:download
+
+      - name: Verify offline npm package mirror
+        run: yarn sandpack:offline:verify
 
       - name: Validate Docker build inputs
         run: |
