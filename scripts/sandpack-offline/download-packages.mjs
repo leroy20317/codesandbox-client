@@ -17,7 +17,12 @@ const JSDELIVR_DATA_BASE = 'https://data.jsdelivr.com';
 const JSDELIVR_NPM_BASE = 'https://cdn.jsdelivr.net';
 
 const REQUEST_RETRIES = 3;
+const PACKAGER_TRIGGER_RETRIES = 10;
+const PACKAGER_TRIGGER_DELAY = 3000;
 const SHOULD_CLEAN = process.argv.includes('--clean');
+
+const CODESANDBOX_PACKAGER_API =
+  'https://aiwi8rnkp5.execute-api.eu-west-1.amazonaws.com/prod/packages';
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -122,13 +127,90 @@ async function downloadJson(url) {
   return readJson(localPath);
 }
 
+async function triggerPackagerBuild(name, version) {
+  const spec = packageSpec(name, version);
+  const query = encodeURIComponent(spec);
+  const packagerUrl = `${CODESANDBOX_PACKAGER_API}/${query}`;
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      packagerUrl,
+      { method: 'POST' },
+      response => {
+        let body = '';
+        response.on('data', chunk => (body += chunk));
+        response.on('end', () => {
+          if (response.statusCode === 200 || response.statusCode === 202) {
+            resolve();
+          } else {
+            reject(
+              new Error(
+                `Packager trigger failed for ${spec}: ${response.statusCode} ${body}`
+              )
+            );
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+async function downloadMetadataToFile(url, name, version) {
+  const localPath = mapUrlToLocalPath(url);
+
+  if (await pathExists(localPath)) {
+    return localPath;
+  }
+
+  await fs.mkdir(path.dirname(localPath), { recursive: true });
+
+  const spec = packageSpec(name, version);
+
+  try {
+    const response = await request(url);
+    await pipeline(response, createWriteStream(localPath));
+    return localPath;
+  } catch (error) {
+    if (!/403|404/.test(error.message)) {
+      throw error;
+    }
+
+    console.log(
+      `[${spec}] Metadata not ready (${error.message}), triggering packager build...`
+    );
+
+    await triggerPackagerBuild(name, version);
+
+    for (let attempt = 1; attempt <= PACKAGER_TRIGGER_RETRIES; attempt++) {
+      console.log(
+        `[${spec}] Retrying metadata download (attempt ${attempt}/${PACKAGER_TRIGGER_RETRIES})...`
+      );
+
+      await sleep(PACKAGER_TRIGGER_DELAY);
+
+      try {
+        const response = await request(url);
+        await pipeline(response, createWriteStream(localPath));
+        console.log(`[${spec}] Metadata download succeeded after trigger`);
+        return localPath;
+      } catch (retryError) {
+        if (attempt === PACKAGER_TRIGGER_RETRIES) {
+          throw retryError;
+        }
+      }
+    }
+  }
+}
+
 async function downloadPackage(name, version) {
   const spec = packageSpec(name, version);
 
   console.log(`[${spec}] Fetching metadata...`);
 
   const metadataUrl = `${CODESANDBOX_PACKAGE_BASE}/v2/packages/${name}/${version}.json`;
-  await downloadToFile(metadataUrl);
+  await downloadMetadataToFile(metadataUrl, name, version);
 
   const flatUrl = `${JSDELIVR_DATA_BASE}/v1/package/npm/${spec}/flat`;
   const flat = await downloadJson(flatUrl);
