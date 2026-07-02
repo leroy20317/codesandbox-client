@@ -39,8 +39,13 @@ function packageSpec(name, version) {
   return `${name}@${version}`;
 }
 
+function withoutLeadingSlash(value) {
+  return value.replace(/^\/+/, '');
+}
+
 function packagePaths(name, version) {
   const spec = packageSpec(name, version);
+  const packageRoot = path.join(OFFLINE_DIR, 'jsdelivr-npm', 'npm', spec);
 
   return {
     metadata: path.join(
@@ -60,13 +65,8 @@ function packagePaths(name, version) {
       spec,
       'flat'
     ),
-    packageJson: path.join(
-      OFFLINE_DIR,
-      'jsdelivr-npm',
-      'npm',
-      spec,
-      'package.json'
-    ),
+    packageRoot,
+    packageJson: path.join(packageRoot, 'package.json'),
   };
 }
 
@@ -84,14 +84,54 @@ function assertSamePackages(allowed, manifest) {
 
 async function verifyPackageFiles(packages) {
   const missing = [];
+  const invalid = [];
 
   for (const [name, version] of Object.entries(packages)) {
     const paths = packagePaths(name, version);
-    for (const [kind, filePath] of Object.entries(paths)) {
+    const requiredPaths = {
+      metadata: paths.metadata,
+      flat: paths.flat,
+      packageJson: paths.packageJson,
+    };
+
+    for (const [kind, filePath] of Object.entries(requiredPaths)) {
       if (!(await pathExists(filePath))) {
         missing.push(`${name}@${version} missing ${kind}: ${filePath}`);
       }
     }
+
+    if (!(await pathExists(paths.flat))) {
+      continue;
+    }
+
+    const flat = await readJson(paths.flat);
+
+    if (!Array.isArray(flat.files)) {
+      invalid.push(`${name}@${version} has invalid flat metadata: ${paths.flat}`);
+      continue;
+    }
+
+    for (const file of flat.files) {
+      if (!file || typeof file.name !== 'string') {
+        invalid.push(`${name}@${version} has invalid flat file entry in ${paths.flat}`);
+        continue;
+      }
+
+      const mirroredPackageFilePath = path.join(
+        paths.packageRoot,
+        withoutLeadingSlash(file.name)
+      );
+
+      if (!(await pathExists(mirroredPackageFilePath))) {
+        missing.push(
+          `${name}@${version} missing mirrored file from flat metadata: ${mirroredPackageFilePath}`
+        );
+      }
+    }
+  }
+
+  if (invalid.length > 0) {
+    throw new Error(`Invalid offline package metadata:\n${invalid.join('\n')}`);
   }
 
   if (missing.length > 0) {

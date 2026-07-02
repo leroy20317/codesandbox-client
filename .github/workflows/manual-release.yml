@@ -8,6 +8,11 @@ on:
         description: 'Release tag, for example v1.0.0'
         required: true
         type: string
+      clean_offline_packages:
+        description: 'Rebuild offline package mirror from scratch instead of reusing the latest image cache'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -70,6 +75,7 @@ jobs:
           password: ${{ github.token }}
 
       - name: Restore offline packages from previous image
+        if: ${{ !inputs.clean_offline_packages }}
         run: |
           if docker pull "$IMAGE_NAME:latest"; then
             container_id="$(docker create "$IMAGE_NAME:latest")"
@@ -82,7 +88,14 @@ jobs:
           fi
 
       - name: Download offline npm package mirror
-        run: yarn sandpack:offline:download
+        env:
+          CLEAN_OFFLINE_PACKAGES: ${{ inputs.clean_offline_packages }}
+        run: |
+          if [[ "$CLEAN_OFFLINE_PACKAGES" == "true" ]]; then
+            node scripts/sandpack-offline/download-packages.mjs --clean
+          else
+            yarn sandpack:offline:download
+          fi
 
       - name: Verify offline npm package mirror
         run: yarn sandpack:offline:verify
