@@ -15,6 +15,7 @@ const CODESANDBOX_PACKAGE_BASE =
   'https://prod-packager-packages.codesandbox.io';
 const JSDELIVR_DATA_BASE = 'https://data.jsdelivr.com';
 const JSDELIVR_NPM_BASE = 'https://cdn.jsdelivr.net';
+const UNPKG_BASE = 'https://unpkg.com';
 
 const REQUEST_RETRIES = 3;
 const PACKAGER_TRIGGER_RETRIES = 10;
@@ -127,6 +128,85 @@ async function downloadJson(url) {
   return readJson(localPath);
 }
 
+async function requestJson(url) {
+  const response = await request(url);
+  const chunks = [];
+
+  for await (const chunk of response) {
+    chunks.push(chunk);
+  }
+
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+function collectUnpkgFiles(entry, files = []) {
+  if (!entry) {
+    return files;
+  }
+
+  if (entry.type === 'file') {
+    files.push({
+      name: entry.path,
+      hash: entry.integrity || '',
+      time: entry.lastModified || '',
+      size: entry.size,
+    });
+    return files;
+  }
+
+  if (Array.isArray(entry.files)) {
+    entry.files.forEach(child => collectUnpkgFiles(child, files));
+  }
+
+  return files;
+}
+
+async function downloadFlatMetadata(name, version) {
+  const spec = packageSpec(name, version);
+  const flatUrl = `${JSDELIVR_DATA_BASE}/v1/package/npm/${spec}/flat`;
+
+  try {
+    return await downloadJson(flatUrl);
+  } catch (error) {
+    console.log(
+      `[${spec}] jsDelivr flat metadata failed (${error.message}), falling back to unpkg metadata...`
+    );
+  }
+
+  const localPath = mapUrlToLocalPath(flatUrl);
+  const unpkgMetaUrl = `${UNPKG_BASE}/${spec}/?meta`;
+  const unpkgMeta = await requestJson(unpkgMetaUrl);
+  const flat = {
+    files: collectUnpkgFiles(unpkgMeta),
+  };
+
+  await fs.mkdir(path.dirname(localPath), { recursive: true });
+  await fs.writeFile(localPath, `${JSON.stringify(flat, null, 2)}\n`);
+
+  console.log(
+    `[${spec}] Wrote jsDelivr-compatible flat metadata from unpkg (${flat.files.length} files)`
+  );
+
+  return flat;
+}
+
+async function downloadPackageFile(spec, fileName) {
+  const jsDelivrUrl = `${JSDELIVR_NPM_BASE}/npm/${spec}${toUrlPath(fileName)}`;
+  const localPath = mapUrlToLocalPath(jsDelivrUrl);
+
+  try {
+    return await downloadToFile(jsDelivrUrl, localPath);
+  } catch (error) {
+    const unpkgUrl = `${UNPKG_BASE}/${spec}${toUrlPath(fileName)}`;
+
+    console.log(
+      `[${spec}] jsDelivr file failed (${error.message}), falling back to unpkg: ${fileName}`
+    );
+
+    return downloadToFile(unpkgUrl, localPath);
+  }
+}
+
 async function triggerPackagerBuild(name, version) {
   const spec = packageSpec(name, version);
   const query = encodeURIComponent(spec);
@@ -212,8 +292,7 @@ async function downloadPackage(name, version) {
   const metadataUrl = `${CODESANDBOX_PACKAGE_BASE}/v2/packages/${name}/${version}.json`;
   await downloadMetadataToFile(metadataUrl, name, version);
 
-  const flatUrl = `${JSDELIVR_DATA_BASE}/v1/package/npm/${spec}/flat`;
-  const flat = await downloadJson(flatUrl);
+  const flat = await downloadFlatMetadata(name, version);
 
   if (!Array.isArray(flat.files)) {
     throw new Error(`Invalid jsDelivr flat response for ${spec}`);
@@ -230,12 +309,7 @@ async function downloadPackage(name, version) {
   for (let i = 0; i < validFiles.length; i += CONCURRENCY) {
     const batch = validFiles.slice(i, i + CONCURRENCY);
     await Promise.all(
-      batch.map(file => {
-        const fileUrl = `${JSDELIVR_NPM_BASE}/npm/${spec}${toUrlPath(
-          file.name
-        )}`;
-        return downloadToFile(fileUrl);
-      })
+      batch.map(file => downloadPackageFile(spec, file.name))
     );
     downloaded += batch.length;
     console.log(`[${spec}] Progress: ${downloaded}/${validFiles.length} files`);

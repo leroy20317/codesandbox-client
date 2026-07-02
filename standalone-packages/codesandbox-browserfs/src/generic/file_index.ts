@@ -79,6 +79,10 @@ export class FileIndex<T> {
     listing.files.forEach((file) => {
       const inode = new FileInode<Stats>(new Stats(FileType.FILE, file.size));
       idx.addPathFast(file.name, inode);
+
+      if (file.name.endsWith('.js')) {
+        idx.addPathFast(file.name.slice(0, -'.js'.length), inode);
+      }
     });
 
     return idx;

@@ -475,10 +475,24 @@ export default class JSDelivrRequest extends BaseFileSystem implements FileSyste
   }
 
   private _getPackagePath(filePath: string): string {
+    filePath = this._getCanonicalFilePath(filePath);
+
     if (filePath.charAt(0) === '/') {
       filePath = filePath.slice(1);
     }
     return `/npm/${this.dependency}@${this.version}/${filePath}`;
+  }
+
+  private _getCanonicalFilePath(filePath: string): string {
+    if (!filePath.endsWith('.js')) {
+      const jsFilePath = `${filePath}.js`;
+
+      if (this._index.getInode(jsFilePath) !== null) {
+        return jsFilePath;
+      }
+    }
+
+    return filePath;
   }
 
   private _getOfflineHTTPPath(filePath: string): string {
